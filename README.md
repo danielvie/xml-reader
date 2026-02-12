@@ -63,6 +63,7 @@ npm run tauri build
 ## 📄 Documentation
 
 For more detailed technical specs and design principles, see:
+- [ARCHITECTURE.md](./doc/ARCHITECTURE.md) - System architecture, diagrams, and data flow.
 - [SPEC.md](./doc/SPEC.md) - Requirements and functionality specification.
 - [LAYOUT.md](./doc/LAYOUT.md) - UI/UX standards, color palettes, and component layouts.
 - [BACKEND.md](./doc/BACKEND.md) - Detailed documentation of Rust backend logic and commands.
