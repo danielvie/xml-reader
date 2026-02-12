@@ -1,0 +1,60 @@
+    Checking xml-reader v0.1.0 (C:\SANDBOX\REPOS\xml-reader\xml-reader\src-tauri)
+error[E0433]: failed to resolve: could not find `__cmd__search_node` in `xml_ops`
+  --> src\lib.rs:11:22
+   |
+11 |             xml_ops::search_node
+   |                      ^^^^^^^^^^^ could not find `__cmd__search_node` in `xml_ops`
+
+warning: unused import: `BufReader`
+ --> src\xml_ops.rs:2:15
+  |
+2 | use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+  |               ^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::sync::Mutex`
+ --> src\xml_ops.rs:5:5
+  |
+5 | use std::sync::Mutex;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused import: `tauri::State`
+ --> src\xml_ops.rs:6:5
+  |
+6 | use tauri::State;
+  |     ^^^^^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+ --> src\xml_ops.rs:7:5
+  |
+7 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Context`
+ --> src\xml_ops.rs:8:14
+  |
+8 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+
+warning: unused variable: `depth`
+  --> src\xml_ops.rs:23:52
+   |
+23 | fn generate_xml_internal(path: &str, size_mb: u32, depth: u32) -> Result<()> {
+   |                                                    ^^^^^ help: if this is intentional, prefix it with an underscore: `_depth`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> src\xml_ops.rs:28:9
+   |
+28 |     let mut elem = BytesStart::new("root");
+   |         ----^^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0433`.
+warning: `xml-reader` (lib) generated 7 warnings
+error: could not compile `xml-reader` (lib) due to 1 previous error; 7 warnings emitted

@@ -1,0 +1,11 @@
+version: '3'
+
+tasks:
+
+  default:
+    deps: [main]
+
+  main:
+    aliases: [m]
+    cmds:
+     - bun run tauri dev
