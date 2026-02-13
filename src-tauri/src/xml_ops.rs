@@ -168,13 +168,7 @@ fn get_first_child_internal(path: &str) -> Result<SearchResult> {
                 let approx_end = find_element_end_pos(&mut reader, &mut buf, &name, file_len)?;
                 let xpath = format!("/{}/{} (first)", root_name, name);
 
-                return extract_and_build_result(
-                    path,
-                    file_len,
-                    approx_start,
-                    approx_end,
-                    &xpath,
-                );
+                return extract_and_build_result(path, file_len, approx_start, approx_end, &xpath);
             }
             Ok(Event::Empty(ref e)) => {
                 if !root_found {
@@ -187,13 +181,7 @@ fn get_first_child_internal(path: &str) -> Result<SearchResult> {
                 let approx_start = pos_before as u64;
                 let approx_end = reader.buffer_position() as u64;
                 let xpath = format!("/{}/{} (first)", root_name, name);
-                return extract_and_build_result(
-                    path,
-                    file_len,
-                    approx_start,
-                    approx_end,
-                    &xpath,
-                );
+                return extract_and_build_result(path, file_len, approx_start, approx_end, &xpath);
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(anyhow::anyhow!("Error: {:?}", e)),
@@ -268,11 +256,11 @@ fn get_last_child_internal(path: &str) -> Result<SearchResult> {
             match tag_kind {
                 TagKind::Close => {
                     depth += 1;
-                    
+
                     if depth == 1 {
                         root_name = tag_name;
                     }
-                    
+
                     // We want the child at depth 1 (child of root).
                     // When we see </Child>, depth goes 1->2.
                     if depth == 2 {
@@ -285,13 +273,7 @@ fn get_last_child_internal(path: &str) -> Result<SearchResult> {
                     if depth == 1 {
                         if let Some(end) = last_tag_end {
                             let xpath = format!("/{}/{} (last)", root_name, tag_name);
-                            return extract_and_build_result(
-                                path,
-                                len,
-                                abs_start,
-                                end,
-                                &xpath,
-                            );
+                            return extract_and_build_result(path, len, abs_start, end, &xpath);
                         }
                     }
                     // If we hit depth 0 (<Root>), we are done searching children.
@@ -304,13 +286,7 @@ fn get_last_child_internal(path: &str) -> Result<SearchResult> {
                     if depth == 1 {
                         let abs_end = abs_start + tag_len as u64;
                         let xpath = format!("/{}/{} (last)", root_name, tag_name);
-                        return extract_and_build_result(
-                            path,
-                            len,
-                            abs_start,
-                            abs_end,
-                            &xpath,
-                        );
+                        return extract_and_build_result(path, len, abs_start, abs_end, &xpath);
                     }
                 }
             }
@@ -370,24 +346,36 @@ pub async fn cancel_search() -> Result<(), String> {
     Ok(())
 }
 
+use tauri::{AppHandle, Emitter};
+
 #[tauri::command]
 pub async fn search_node(
+    app: AppHandle,
     path: String,
     query: String,
     start_offset: u64,
 ) -> Result<SearchResult, String> {
     SEARCH_CANCELLED.store(false, Ordering::SeqCst);
-    search_node_internal(&path, &query, start_offset).map_err(|e| e.to_string())
+    search_node_internal(&app, &path, &query, start_offset).map_err(|e| e.to_string())
 }
 
-fn search_node_internal(path: &str, query: &str, start_offset: u64) -> Result<SearchResult> {
+fn search_node_internal(
+    app: &AppHandle,
+    path: &str,
+    query: &str,
+    start_offset: u64,
+) -> Result<SearchResult> {
     let file = File::open(path)?;
     let file_len = file.metadata()?.len();
-    let mut reader = quick_xml::Reader::from_reader(BufReader::new(file));
+    // Increase buffer size to 1MB for better performance on large files
+    let mut reader = quick_xml::Reader::from_reader(BufReader::with_capacity(1024 * 1024, file));
 
     let mut buf = Vec::new();
     let mut stack: Vec<String> = Vec::new();
-    let query_lower = query.to_lowercase();
+    let query_bytes = query.to_lowercase().into_bytes();
+
+    let mut last_progress = 0u64;
+    let total_len = file_len as f64;
 
     loop {
         if SEARCH_CANCELLED.load(Ordering::SeqCst) {
@@ -403,12 +391,19 @@ fn search_node_internal(path: &str, query: &str, start_offset: u64) -> Result<Se
 
         let pos_before = reader.buffer_position();
 
+        // Report progress every ~1% or continuously if small
+        let current_progress = ((pos_before as f64 / total_len) * 100.0) as u64;
+        if current_progress > last_progress {
+            last_progress = current_progress;
+            let _ = app.emit("search-progress", current_progress);
+        }
+
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 stack.push(name.clone());
 
-                if pos_before as u64 >= start_offset && element_matches(e, &name, &query_lower) {
+                if pos_before as u64 >= start_offset && element_matches_bytes(e, &query_bytes) {
                     let approx_start = pos_before as u64;
 
                     // Find end of element by continuing to parse until matching close tag
@@ -416,6 +411,9 @@ fn search_node_internal(path: &str, query: &str, start_offset: u64) -> Result<Se
 
                     let xpath = format!("/{}", stack.join("/"));
                     stack.pop();
+
+                    // Emit 100% progress on find
+                    let _ = app.emit("search-progress", 100u64);
 
                     // Extract exact text from the file
                     return extract_and_build_result(
@@ -432,13 +430,16 @@ fn search_node_internal(path: &str, query: &str, start_offset: u64) -> Result<Se
             }
             Ok(Event::Empty(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if pos_before as u64 >= start_offset && element_matches(e, &name, &query_lower) {
+                if pos_before as u64 >= start_offset && element_matches_bytes(e, &query_bytes) {
                     let approx_start = pos_before as u64;
                     let approx_end = reader.buffer_position() as u64;
 
                     let mut current_path = stack.clone();
                     current_path.push(name.clone());
                     let xpath = format!("/{}", current_path.join("/"));
+
+                    // Emit 100% progress on find
+                    let _ = app.emit("search-progress", 100u64);
 
                     return extract_and_build_result(
                         path,
@@ -462,6 +463,9 @@ fn search_node_internal(path: &str, query: &str, start_offset: u64) -> Result<Se
         buf.clear();
     }
 
+    // Emit 100% progress on end
+    let _ = app.emit("search-progress", 100u64);
+
     Ok(SearchResult {
         found: false,
         xpath: String::new(),
@@ -473,20 +477,62 @@ fn search_node_internal(path: &str, query: &str, start_offset: u64) -> Result<Se
 }
 
 /// Check if an element matches the query by tag name, guid, id, or name attribute.
-fn element_matches(e: &BytesStart, tag_name: &str, query_lower: &str) -> bool {
-    if tag_name.to_lowercase().contains(query_lower) {
+/// Uses raw bytes comparison to avoid allocations.
+fn element_matches_bytes(e: &BytesStart, query_bytes: &[u8]) -> bool {
+    // Check tag name
+    if contains_ignore_case(e.name().as_ref(), query_bytes) {
         return true;
     }
+
+    // Check specific attributes
     for attr in e.attributes().flatten() {
-        let key = String::from_utf8_lossy(attr.key.as_ref()).to_lowercase();
-        if key == "guid" || key == "id" || key == "name" {
-            let val = String::from_utf8_lossy(&attr.value).to_lowercase();
-            if val.contains(query_lower) {
+        // key comparison (case-insensitive not strictly needed for standard attributes but good for robustness)
+        // We only care about specific keys. Check them directly.
+        let key = attr.key.as_ref();
+        if key_matches(key, b"guid") || key_matches(key, b"id") || key_matches(key, b"name") {
+            if contains_ignore_case(&attr.value, query_bytes) {
                 return true;
             }
         }
     }
     false
+}
+
+#[inline(always)]
+fn key_matches(key: &[u8], target: &[u8]) -> bool {
+    if key.len() != target.len() {
+        return false;
+    }
+    for (b1, b2) in key.iter().zip(target.iter()) {
+        if !b1.eq_ignore_ascii_case(b2) {
+            return false;
+        }
+    }
+    true
+}
+
+fn contains_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if haystack.len() < needle.len() {
+        return false;
+    }
+
+    // Windows over haystack
+    for window in haystack.windows(needle.len()) {
+        if iter_eq_ignore_case(window, needle) {
+            return true;
+        }
+    }
+    false
+}
+
+#[inline(always)]
+fn iter_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
+    a.iter()
+        .zip(b.iter())
+        .all(|(x, y)| x.eq_ignore_ascii_case(y))
 }
 
 /// After consuming a Start event, continue parsing until the matching End event.
@@ -551,10 +597,10 @@ fn extract_and_build_result(
     // If it points to '<', we are good.
     // If it points to ' ' (whitespace), we want the NEXT '<', not the previous one.
     // BUT pos_before is captured *before* the event.
-    
+
     // Check if the byte at the very end (approx_start) is '<'.
     let mut exact_start = approx_start;
-    
+
     // Safety check: verify if we are actually at '<'
     if n > 0 {
         let last_byte_idx = n - 1;
@@ -566,13 +612,13 @@ fn extract_and_build_result(
             // We should scan FORWARD to find the '<', because the event we just read STARTED here (or after).
             // But waiting... we read the event successfully. The event content starts shortly after pos_before.
             // So we should search *forward* from approx_start, not backward.
-            
+
             // Let's read forward a bit.
             let fwd_search_len = 256;
             file.seek(SeekFrom::Start(approx_start))?;
             let mut buf_fwd = vec![0u8; fwd_search_len];
             let n_fwd = file.read(&mut buf_fwd)?;
-            
+
             for i in 0..n_fwd {
                 if buf_fwd[i] == b'<' {
                     exact_start = approx_start + i as u64;
@@ -606,7 +652,7 @@ fn extract_and_build_result(
     let element_text = String::from_utf8_lossy(&elem_buf).to_string();
 
     // --- Read context before (up to 2KB) ---
-    let ctx_size = 2000u64;
+    let ctx_size = 10000u64;
     let before_start = exact_start.saturating_sub(ctx_size);
     let before_len = (exact_start - before_start) as usize;
     let context_before = if before_len > 0 {

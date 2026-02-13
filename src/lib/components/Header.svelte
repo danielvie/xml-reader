@@ -91,7 +91,7 @@
                 <span
                     class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-blue-400 animate-pulse bg-gray-900/80 px-1"
                 >
-                    searching...
+                    searching... {appState.searchProgress}%
                 </span>
             {/if}
         </div>

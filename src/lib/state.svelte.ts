@@ -1,11 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
+import { listen } from "@tauri-apps/api/event";
 
 export interface RecentFile {
   path: string;
   name: string;
   openedAt: number;
 }
+// ... (rest of imports/interfaces)
+
+// ...
+
+
 
 const RECENT_FILES_KEY = "xml-reader-recent-files";
 const MAX_RECENT_FILES = 10;
@@ -37,6 +43,7 @@ export class AppState {
   viewOffset = $state<number>(0);
   isSearching = $state<boolean>(false);
   isLoadingElement = $state<boolean>(false);
+  searchProgress = $state<number>(0);
 
   // Three-section content
   contentBefore = $state<string>("");
@@ -61,7 +68,15 @@ export class AppState {
     return this.currentFile.split(/[\\/]/).pop() || this.currentFile;
   }
 
-  constructor() {}
+  constructor() {
+    this.setupListeners();
+  }
+
+  async setupListeners() {
+    await listen<number>("search-progress", (event) => {
+      this.searchProgress = event.payload;
+    });
+  }
 
   private addToRecentFiles(path: string) {
     const name = path.split(/[\\/]/).pop() || path;
@@ -175,6 +190,7 @@ export class AppState {
     if (!this.currentFile || !query) return;
 
     this.isSearching = true;
+    this.searchProgress = 0;
     this.searchQuery = query;
 
     try {
@@ -205,6 +221,7 @@ export class AppState {
       console.error("Search failed:", e);
     } finally {
       this.isSearching = false;
+      this.searchProgress = 0;
     }
   }
 
