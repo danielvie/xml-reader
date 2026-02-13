@@ -1,11 +1,15 @@
-version: '3'
+version: "3"
 
 tasks:
-
   default:
     deps: [main]
 
   main:
     aliases: [m]
     cmds:
-     - bun run tauri dev
+      - bun run tauri dev
+
+  build:
+    aliases: [b]
+    cmds:
+      - bun run tauri build
