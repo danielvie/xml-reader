@@ -63,29 +63,28 @@
 
     <!-- Search -->
     <div
-        class="flex items-center gap-1.5 border border-gray-700 rounded-sm px-3 py-1 bg-gray-800/50 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500/30 transition-colors w-56 shrink-0"
+        class="flex items-center gap-1.5 border border-gray-700 rounded-sm px-2 py-1 bg-gray-800/50 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500/30 transition-colors w-72 shrink-0"
     >
-        <svg
-            class="text-gray-500 shrink-0"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+        <select
+            bind:value={appState.searchType}
+            class="bg-transparent text-xs text-gray-400 border-none outline-none font-mono cursor-pointer *:bg-gray-800 *:text-gray-300"
         >
-            <circle cx="11" cy="11" r="7" />
-            <line x1="16.5" y1="16.5" x2="21" y2="21" />
-        </svg>
-        <div class="relative flex-1">
+            <option value="any">Any</option>
+            <option value="guid">GUID</option>
+            <option value="id">ID</option>
+            <option value="name">Name</option>
+            <option value="eaid">EAID</option>
+            <option value="value">Value</option>
+            <option value="guidref">GUIDRef</option>
+        </select>
+        <div class="h-4 w-px bg-gray-700 shrink-0"></div>
+        <div class="relative flex-1 min-w-0">
             <input
                 type="text"
                 bind:value={searchQuery}
                 onkeydown={(e) => e.key === "Enter" && handleSearch(true)}
                 placeholder="Find tag..."
-                class="w-full bg-transparent py-1 px-3 font-mono border-none outline-none text-xs text-gray-200 placeholder-gray-600"
+                class="w-full bg-transparent py-0 px-2 font-mono border-none outline-none text-xs text-gray-200 placeholder-gray-600"
             />
             {#if appState.isSearching}
                 <span

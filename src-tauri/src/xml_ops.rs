@@ -353,16 +353,18 @@ pub async fn search_node(
     app: AppHandle,
     path: String,
     query: String,
+    search_type: String,
     start_offset: u64,
 ) -> Result<SearchResult, String> {
     SEARCH_CANCELLED.store(false, Ordering::SeqCst);
-    search_node_internal(&app, &path, &query, start_offset).map_err(|e| e.to_string())
+    search_node_internal(&app, &path, &query, &search_type, start_offset).map_err(|e| e.to_string())
 }
 
 fn search_node_internal(
     app: &AppHandle,
     path: &str,
     query: &str,
+    search_type: &str,
     start_offset: u64,
 ) -> Result<SearchResult> {
     let file = File::open(path)?;
@@ -373,7 +375,8 @@ fn search_node_internal(
     let mut buf = Vec::new();
     let mut stack: Vec<String> = Vec::new();
     let query_bytes = query.to_lowercase().into_bytes();
-
+    let type_bytes = search_type.to_lowercase().into_bytes();
+    
     let mut last_progress = 0u64;
     let total_len = file_len as f64;
 
@@ -390,7 +393,7 @@ fn search_node_internal(
         }
 
         let pos_before = reader.buffer_position();
-
+        
         // Report progress every ~1% or continuously if small
         let current_progress = ((pos_before as f64 / total_len) * 100.0) as u64;
         if current_progress > last_progress {
@@ -403,7 +406,7 @@ fn search_node_internal(
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 stack.push(name.clone());
 
-                if pos_before as u64 >= start_offset && element_matches_bytes(e, &query_bytes) {
+                if pos_before as u64 >= start_offset && element_matches_bytes(e, &query_bytes, &type_bytes) {
                     let approx_start = pos_before as u64;
 
                     // Find end of element by continuing to parse until matching close tag
@@ -411,7 +414,7 @@ fn search_node_internal(
 
                     let xpath = format!("/{}", stack.join("/"));
                     stack.pop();
-
+                    
                     // Emit 100% progress on find
                     let _ = app.emit("search-progress", 100u64);
 
@@ -430,14 +433,14 @@ fn search_node_internal(
             }
             Ok(Event::Empty(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if pos_before as u64 >= start_offset && element_matches_bytes(e, &query_bytes) {
+                if pos_before as u64 >= start_offset && element_matches_bytes(e, &query_bytes, &type_bytes) {
                     let approx_start = pos_before as u64;
                     let approx_end = reader.buffer_position() as u64;
 
                     let mut current_path = stack.clone();
                     current_path.push(name.clone());
                     let xpath = format!("/{}", current_path.join("/"));
-
+                    
                     // Emit 100% progress on find
                     let _ = app.emit("search-progress", 100u64);
 
@@ -462,7 +465,7 @@ fn search_node_internal(
         }
         buf.clear();
     }
-
+    
     // Emit 100% progress on end
     let _ = app.emit("search-progress", 100u64);
 
@@ -478,18 +481,36 @@ fn search_node_internal(
 
 /// Check if an element matches the query by tag name, guid, id, or name attribute.
 /// Uses raw bytes comparison to avoid allocations.
-fn element_matches_bytes(e: &BytesStart, query_bytes: &[u8]) -> bool {
-    // Check tag name
-    if contains_ignore_case(e.name().as_ref(), query_bytes) {
+fn element_matches_bytes(e: &BytesStart, query_bytes: &[u8], type_bytes: &[u8]) -> bool {
+    // If type is "tag" or "any", check tag name
+    if (type_bytes.is_empty() || type_bytes == b"tag" || type_bytes == b"any") && contains_ignore_case(e.name().as_ref(), query_bytes) {
         return true;
     }
-
+    
     // Check specific attributes
     for attr in e.attributes().flatten() {
-        // key comparison (case-insensitive not strictly needed for standard attributes but good for robustness)
-        // We only care about specific keys. Check them directly.
         let key = attr.key.as_ref();
-        if key_matches(key, b"guid") || key_matches(key, b"id") || key_matches(key, b"name") {
+        
+        let mut check_this_attr = false;
+
+        // "any" matches everything in our list
+        if type_bytes == b"any" {
+            if key_matches(key, b"guid") || 
+               key_matches(key, b"id") || 
+               key_matches(key, b"name") ||
+               key_matches(key, b"eaid") ||
+               key_matches(key, b"value") ||
+               key_matches(key, b"guidref") {
+                check_this_attr = true;
+            }
+        } else {
+            // specific match
+            if key_matches(key, type_bytes) {
+                check_this_attr = true;
+            }
+        }
+        
+        if check_this_attr {
             if contains_ignore_case(&attr.value, query_bytes) {
                 return true;
             }

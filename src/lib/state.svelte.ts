@@ -44,6 +44,7 @@ export class AppState {
   isSearching = $state<boolean>(false);
   isLoadingElement = $state<boolean>(false);
   searchProgress = $state<number>(0);
+  searchType = $state<string>("guid");
 
   // Three-section content
   contentBefore = $state<string>("");
@@ -204,6 +205,7 @@ export class AppState {
       const result: any = await invoke("search_node", {
         path: this.currentFile,
         query: query,
+        searchType: this.searchType,
         startOffset: start,
       });
 
