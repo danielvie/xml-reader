@@ -165,7 +165,7 @@ fn get_first_child_internal(path: &str) -> Result<SearchResult> {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 // Found first child!
                 let approx_start = pos_before as u64;
-                let approx_end = find_element_end_pos(&mut reader, &mut buf, &name, file_len)?;
+                let approx_end = find_element_end_pos(&mut reader, &mut buf, &name, file_len, 0)?;
                 let xpath = format!("/{}/{} (first)", root_name, name);
 
                 return extract_and_build_result(path, file_len, approx_start, approx_end, &xpath);
@@ -367,13 +367,26 @@ fn search_node_internal(
     search_type: &str,
     start_offset: u64,
 ) -> Result<SearchResult> {
-    let file = File::open(path)?;
+    let mut file = File::open(path)?;
     let file_len = file.metadata()?.len();
+    
+    // Seek to start_offset if > 0
+    if start_offset > 0 {
+        file.seek(SeekFrom::Start(start_offset))?;
+    }
+
     // Increase buffer size to 1MB for better performance on large files
     let mut reader = quick_xml::Reader::from_reader(BufReader::with_capacity(1024 * 1024, file));
+    reader.check_end_names(false);
 
     let mut buf = Vec::new();
     let mut stack: Vec<String> = Vec::new();
+    // If we sought, we don't know the parents. Push a placeholder or empty?
+    // Let's just keep stack empty. The found element will be at top level relative to search.
+    if start_offset > 0 {
+        // We know the stack is invalid, but we will reconstruct it exactly when needed
+    }
+
     let query_bytes = query.to_lowercase().into_bytes();
     let type_bytes = search_type.to_lowercase().into_bytes();
     
@@ -392,12 +405,13 @@ fn search_node_internal(
             });
         }
 
-        let pos_before = reader.buffer_position();
+        // buffer_position() is relative to where we started reading
+        let pos_before = start_offset + reader.buffer_position() as u64;
         
         // Report progress every ~1% or continuously if small
         let current_progress = ((pos_before as f64 / total_len) * 100.0) as u64;
-        // Only emit progress if we have reached the start_offset (to avoid jumping back to 0% in UI)
-        if (pos_before as u64) >= start_offset && current_progress > last_progress {
+        // Only emit if changed (and since we sought, we are already at start_offset)
+        if current_progress > last_progress {
             last_progress = current_progress;
             let _ = app.emit("search-progress", current_progress);
         }
@@ -407,13 +421,20 @@ fn search_node_internal(
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 stack.push(name.clone());
 
-                if pos_before as u64 >= start_offset && element_matches_bytes(e, &query_bytes, &type_bytes) {
+                if element_matches_bytes(e, &query_bytes, &type_bytes) {
                     let approx_start = pos_before as u64;
 
                     // Find end of element by continuing to parse until matching close tag
-                    let approx_end = find_element_end_pos(&mut reader, &mut buf, &name, file_len)?;
+                    let approx_end = find_element_end_pos(&mut reader, &mut buf, &name, file_len, start_offset)?; // Needed?
 
-                    let xpath = format!("/{}", stack.join("/"));
+                    let xpath = if start_offset > 0 {
+                        let mut p = reconstruct_xpath(path, approx_start)?;
+                        p.push_str(&format!("/{}", name));
+                        p
+                    } else {
+                        format!("/{}", stack.join("/"))
+                    };
+                    
                     stack.pop();
                     
                     // Emit 100% progress on find
@@ -434,13 +455,20 @@ fn search_node_internal(
             }
             Ok(Event::Empty(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if pos_before as u64 >= start_offset && element_matches_bytes(e, &query_bytes, &type_bytes) {
+                if element_matches_bytes(e, &query_bytes, &type_bytes) {
                     let approx_start = pos_before as u64;
-                    let approx_end = reader.buffer_position() as u64;
+                    let approx_end = start_offset + reader.buffer_position() as u64;
 
-                    let mut current_path = stack.clone();
-                    current_path.push(name.clone());
-                    let xpath = format!("/{}", current_path.join("/"));
+                    let xpath = if start_offset > 0 {
+                        // For empty element, reconstruct to start
+                        let mut p = reconstruct_xpath(path, approx_start)?;
+                        p.push_str(&format!("/{}", name));
+                        p
+                    } else {
+                         let mut current_path = stack.clone();
+                        current_path.push(name.clone());
+                        format!("/{}", current_path.join("/"))
+                    };
                     
                     // Emit 100% progress on find
                     let _ = app.emit("search-progress", 100u64);
@@ -564,6 +592,7 @@ fn find_element_end_pos(
     buf: &mut Vec<u8>,
     tag_name: &str,
     file_len: u64,
+    start_offset: u64,
 ) -> Result<u64> {
     let mut depth = 1u32;
     loop {
@@ -582,12 +611,12 @@ fn find_element_end_pos(
                 if name == tag_name {
                     depth -= 1;
                     if depth == 0 {
-                        return Ok(reader.buffer_position() as u64);
+                        return Ok(start_offset + reader.buffer_position() as u64);
                     }
                 }
             }
             Ok(Event::Eof) => return Ok(file_len),
-            Err(_) => return Ok(reader.buffer_position() as u64),
+            Err(_) => return Ok(start_offset + reader.buffer_position() as u64),
             _ => (),
         }
     }
@@ -705,4 +734,37 @@ fn extract_and_build_result(
         context_after,
         offset: exact_start,
     })
+}
+
+fn reconstruct_xpath(path: &str, target_offset: u64) -> Result<String> {
+    let file = File::open(path)?;
+    let mut reader = quick_xml::Reader::from_reader(BufReader::with_capacity(1024 * 1024, file));
+    reader.check_end_names(false);
+
+    let mut buf = Vec::new();
+    let mut stack: Vec<String> = Vec::new();
+
+    loop {
+        // Must check position BEFORE reading event
+        // Note: buffer_position is relative to start of file (since we started from 0)
+        let pos = reader.buffer_position() as u64;
+        if pos >= target_offset {
+            break;
+        }
+
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                stack.push(name);
+            }
+            Ok(Event::End(_)) => {
+                stack.pop();
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break, // Ignore errors, just do best effor
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(format!("/{}", stack.join("/")))
 }

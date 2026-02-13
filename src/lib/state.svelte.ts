@@ -46,6 +46,7 @@ export class AppState {
   searchProgress = $state<number>(0);
   searchType = $state<string>("guid");
   searchStartPercentage = $state<number>(0);
+  syncedPercentage = 0;
 
   // Three-section content
   contentBefore = $state<string>("");
@@ -191,6 +192,12 @@ export class AppState {
   async performSearch(query: string, next: boolean = true) {
     if (!this.currentFile || !query) return;
 
+    // If user manually changed the percentage, restart the search flow
+    if (Math.abs(this.searchStartPercentage - this.syncedPercentage) > 0.0001) {
+      this.lastMatchOffset = null;
+      this.syncedPercentage = this.searchStartPercentage;
+    }
+
     this.isSearching = true;
     this.searchProgress = 0;
     this.searchQuery = query;
@@ -219,7 +226,9 @@ export class AppState {
         this.currentXpath = result.xpath;
         // Update the start percentage input to reflect where we found the match
         if (this.fileSize > 0) {
-          this.searchStartPercentage = Number((result.offset / this.fileSize).toFixed(4));
+          const newPct = Number((result.offset / this.fileSize).toFixed(4));
+          this.searchStartPercentage = newPct;
+          this.syncedPercentage = newPct;
         }
       } else {
         if (this.searchNotFoundTimer) clearTimeout(this.searchNotFoundTimer);
