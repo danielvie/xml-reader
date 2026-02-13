@@ -146,41 +146,53 @@ fn get_first_child_internal(path: &str) -> Result<SearchResult> {
     let file = File::open(path)?;
     let file_len = file.metadata()?.len();
     let mut reader = quick_xml::Reader::from_reader(BufReader::new(file));
-    reader.trim_text(true);
 
     let mut buf = Vec::new();
+    let mut root_found = false;
+    let mut root_name = String::new();
 
     // Loop until we find the first child element (the one after <root>)
     loop {
         let pos_before = reader.buffer_position();
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if name == "root" {
-                    continue; // Skip root
+                if !root_found {
+                    root_found = true;
+                    root_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    continue;
                 }
+
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 // Found first child!
                 let approx_start = pos_before as u64;
                 let approx_end = find_element_end_pos(&mut reader, &mut buf, &name, file_len)?;
+                let xpath = format!("/{}/{} (first)", root_name, name);
 
                 return extract_and_build_result(
                     path,
                     file_len,
                     approx_start,
                     approx_end,
-                    "/root (first)",
+                    &xpath,
                 );
             }
-            Ok(Event::Empty(ref _e)) => {
+            Ok(Event::Empty(ref e)) => {
+                if !root_found {
+                    // Root is self-closing -> <Root />. No children.
+                    return Err(anyhow::anyhow!("Root element is empty (no children)").into());
+                }
+
                 // First child is empty self-closing tag
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 let approx_start = pos_before as u64;
                 let approx_end = reader.buffer_position() as u64;
+                let xpath = format!("/{}/{} (first)", root_name, name);
                 return extract_and_build_result(
                     path,
                     file_len,
                     approx_start,
                     approx_end,
-                    "/root (first)",
+                    &xpath,
                 );
             }
             Ok(Event::Eof) => break,
@@ -207,6 +219,7 @@ fn get_last_child_internal(path: &str) -> Result<SearchResult> {
 
     let mut depth: i32 = 0;
     let mut last_tag_end: Option<u64> = None;
+    let mut root_name = String::new();
 
     // Scan backwards from the end in chunks.
     // Uses a SINGLE file handle and parses tags directly from the buffer
@@ -252,38 +265,51 @@ fn get_last_child_internal(path: &str) -> Result<SearchResult> {
                 None => continue, // PI, comment, CDATA, or malformed — skip
             };
 
-            if tag_name == "root" {
-                continue;
-            }
-
             match tag_kind {
                 TagKind::Close => {
-                    if depth == 0 {
+                    depth += 1;
+                    
+                    if depth == 1 {
+                        root_name = tag_name;
+                    }
+                    
+                    // We want the child at depth 1 (child of root).
+                    // When we see </Child>, depth goes 1->2.
+                    if depth == 2 {
                         last_tag_end = Some(abs_start + tag_len as u64);
                     }
-                    depth += 1;
                 }
                 TagKind::Open => {
                     depth -= 1;
-                    if depth == 0 && last_tag_end.is_some() {
-                        return extract_and_build_result(
-                            path,
-                            len,
-                            abs_start,
-                            last_tag_end.unwrap(),
-                            "/root (last)",
-                        );
+                    // Opening tag for child at depth 1. depth 2->1.
+                    if depth == 1 {
+                        if let Some(end) = last_tag_end {
+                            let xpath = format!("/{}/{} (last)", root_name, tag_name);
+                            return extract_and_build_result(
+                                path,
+                                len,
+                                abs_start,
+                                end,
+                                &xpath,
+                            );
+                        }
+                    }
+                    // If we hit depth 0 (<Root>), we are done searching children.
+                    if depth == 0 {
+                        return Err(anyhow::anyhow!("No last child found (root exited)"));
                     }
                 }
                 TagKind::Empty => {
-                    if depth == 0 {
+                    // <Child /> at depth 1.
+                    if depth == 1 {
                         let abs_end = abs_start + tag_len as u64;
+                        let xpath = format!("/{}/{} (last)", root_name, tag_name);
                         return extract_and_build_result(
                             path,
                             len,
                             abs_start,
                             abs_end,
-                            "/root (last)",
+                            &xpath,
                         );
                     }
                 }
@@ -358,7 +384,6 @@ fn search_node_internal(path: &str, query: &str, start_offset: u64) -> Result<Se
     let file = File::open(path)?;
     let file_len = file.metadata()?.len();
     let mut reader = quick_xml::Reader::from_reader(BufReader::new(file));
-    reader.trim_text(true);
 
     let mut buf = Vec::new();
     let mut stack: Vec<String> = Vec::new();
@@ -512,6 +537,8 @@ fn extract_and_build_result(
     let mut file = File::open(path)?;
 
     // --- Find exact start: scan backwards for '<' ---
+    // --- Find exact start: scan backwards for '<' ---
+    // If approx_start points to whitespace/content after a tag, we need to find the START of the current tag.
     let search_back = 128u64;
     let scan_start = approx_start.saturating_sub(search_back);
     file.seek(SeekFrom::Start(scan_start))?;
@@ -519,11 +546,39 @@ fn extract_and_build_result(
     let mut scan_buf = vec![0u8; scan_len];
     let n = file.read(&mut scan_buf)?;
 
+    // We want the LAST '<' in the buffer that is NOT part of a closing tag like '</...>'.
+    // Actually, quick-xml event position is usually at the start of the event.
+    // If it points to '<', we are good.
+    // If it points to ' ' (whitespace), we want the NEXT '<', not the previous one.
+    // BUT pos_before is captured *before* the event.
+    
+    // Check if the byte at the very end (approx_start) is '<'.
     let mut exact_start = approx_start;
-    for i in (0..n).rev() {
-        if scan_buf[i] == b'<' {
-            exact_start = scan_start + i as u64;
-            break;
+    
+    // Safety check: verify if we are actually at '<'
+    if n > 0 {
+        let last_byte_idx = n - 1;
+        if scan_buf[last_byte_idx] == b'<' {
+            // Perfect, we are at the start.
+            exact_start = scan_start + last_byte_idx as u64;
+        } else {
+            // We are NOT at '<'. This happens if pos_before included leading whitespace.
+            // We should scan FORWARD to find the '<', because the event we just read STARTED here (or after).
+            // But waiting... we read the event successfully. The event content starts shortly after pos_before.
+            // So we should search *forward* from approx_start, not backward.
+            
+            // Let's read forward a bit.
+            let fwd_search_len = 256;
+            file.seek(SeekFrom::Start(approx_start))?;
+            let mut buf_fwd = vec![0u8; fwd_search_len];
+            let n_fwd = file.read(&mut buf_fwd)?;
+            
+            for i in 0..n_fwd {
+                if buf_fwd[i] == b'<' {
+                    exact_start = approx_start + i as u64;
+                    break;
+                }
+            }
         }
     }
 

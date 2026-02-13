@@ -103,7 +103,7 @@ export class AppState {
         path: this.currentFile,
       });
       this.updateViewFromResult(result);
-      this.currentXpath = "/root (first)";
+      this.currentXpath = result.xpath;
     } catch (e) {
       console.error("Failed to go to start:", e);
     } finally {
@@ -119,7 +119,7 @@ export class AppState {
         path: this.currentFile,
       });
       this.updateViewFromResult(result);
-      this.currentXpath = "/root (last)";
+      this.currentXpath = result.xpath;
     } catch (e) {
       console.error("Failed to go to end:", e);
     } finally {
