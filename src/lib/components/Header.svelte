@@ -63,7 +63,7 @@
 
     <!-- Search -->
     <div
-        class="flex items-center gap-1.5 border border-gray-700 rounded-sm px-2 py-1 bg-gray-800/50 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500/30 transition-colors w-72 shrink-0"
+        class="flex items-center gap-1.5 border border-gray-700 rounded-sm px-2 py-1 bg-gray-800/50 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500/30 transition-colors flex-1 min-w-0"
     >
         <select
             bind:value={appState.searchType}
@@ -77,6 +77,16 @@
             <option value="value">Value</option>
             <option value="guidref">GUIDRef</option>
         </select>
+        <div class="h-4 w-px bg-gray-700 shrink-0"></div>
+        <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.1"
+            bind:value={appState.searchStartPercentage}
+            class="bg-transparent text-xs text-gray-400 border-none outline-none font-mono w-10 text-center"
+            title="Start % (0.0-1.0)"
+        />
         <div class="h-4 w-px bg-gray-700 shrink-0"></div>
         <div class="relative flex-1 min-w-0">
             <input

@@ -396,7 +396,8 @@ fn search_node_internal(
         
         // Report progress every ~1% or continuously if small
         let current_progress = ((pos_before as f64 / total_len) * 100.0) as u64;
-        if current_progress > last_progress {
+        // Only emit progress if we have reached the start_offset (to avoid jumping back to 0% in UI)
+        if (pos_before as u64) >= start_offset && current_progress > last_progress {
             last_progress = current_progress;
             let _ = app.emit("search-progress", current_progress);
         }

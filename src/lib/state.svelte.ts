@@ -45,6 +45,7 @@ export class AppState {
   isLoadingElement = $state<boolean>(false);
   searchProgress = $state<number>(0);
   searchType = $state<string>("guid");
+  searchStartPercentage = $state<number>(0);
 
   // Three-section content
   contentBefore = $state<string>("");
@@ -195,11 +196,15 @@ export class AppState {
     this.searchQuery = query;
 
     try {
-      let start = this.viewOffset;
+      let start = 0;
       if (this.lastMatchOffset !== null && next) {
         start = this.lastMatchOffset + 1;
-      } else if (!next) {
-        start = 0;
+        // When continuing, the progress reflects current position
+        this.searchProgress = Math.floor((start / this.fileSize) * 100);
+      } else {
+        // Start from the specified percentage
+        start = Math.floor(this.fileSize * this.searchStartPercentage);
+        this.searchProgress = Math.floor(this.searchStartPercentage * 100);
       }
 
       const result: any = await invoke("search_node", {
@@ -212,6 +217,10 @@ export class AppState {
       if (result.found) {
         this.updateViewFromResult(result);
         this.currentXpath = result.xpath;
+        // Update the start percentage input to reflect where we found the match
+        if (this.fileSize > 0) {
+          this.searchStartPercentage = Number((result.offset / this.fileSize).toFixed(4));
+        }
       } else {
         if (this.searchNotFoundTimer) clearTimeout(this.searchNotFoundTimer);
         this.searchNotFound = true;
