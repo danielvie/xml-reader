@@ -138,6 +138,12 @@ pub struct SearchResult {
 }
 
 #[tauri::command]
+pub async fn resolve_xpath(path: String, offset: u64, tag_name: String) -> Result<String, String> {
+    let parent_path = reconstruct_xpath(&path, offset).map_err(|e| e.to_string())?;
+    Ok(format!("{}/{}", parent_path, tag_name))
+}
+
+#[tauri::command]
 pub async fn get_first_child(path: String) -> Result<SearchResult, String> {
     get_first_child_internal(&path).map_err(|e| e.to_string())
 }
@@ -427,14 +433,7 @@ fn search_node_internal(
                     // Find end of element by continuing to parse until matching close tag
                     let approx_end = find_element_end_pos(&mut reader, &mut buf, &name, file_len, start_offset)?; // Needed?
 
-                    let xpath = if start_offset > 0 {
-                        let mut p = reconstruct_xpath(path, approx_start)?;
-                        p.push_str(&format!("/{}", name));
-                        p
-                    } else {
-                        format!("/{}", stack.join("/"))
-                    };
-                    
+                    let xpath = format!("/{}", stack.join("/"));
                     stack.pop();
                     
                     // Emit 100% progress on find
@@ -459,16 +458,9 @@ fn search_node_internal(
                     let approx_start = pos_before as u64;
                     let approx_end = start_offset + reader.buffer_position() as u64;
 
-                    let xpath = if start_offset > 0 {
-                        // For empty element, reconstruct to start
-                        let mut p = reconstruct_xpath(path, approx_start)?;
-                        p.push_str(&format!("/{}", name));
-                        p
-                    } else {
-                         let mut current_path = stack.clone();
-                        current_path.push(name.clone());
-                        format!("/{}", current_path.join("/"))
-                    };
+                    let mut current_path = stack.clone();
+                    current_path.push(name.clone());
+                    let xpath = format!("/{}", current_path.join("/"));
                     
                     // Emit 100% progress on find
                     let _ = app.emit("search-progress", 100u64);
@@ -595,8 +587,17 @@ fn find_element_end_pos(
     start_offset: u64,
 ) -> Result<u64> {
     let mut depth = 1u32;
+    let initial_pos = reader.buffer_position();
+    let scan_limit = 10 * 1024 * 1024; // 10MB limit
+
     loop {
         buf.clear();
+        let current_pos = reader.buffer_position();
+        if current_pos - initial_pos > scan_limit {
+            // Stop scanning if element is too large
+            return Ok(start_offset + current_pos as u64);
+        }
+
         match reader.read_event_into(buf) {
             Ok(Event::Start(ref e)) => {
                 let qname = e.name();
@@ -696,11 +697,18 @@ fn extract_and_build_result(
     }
 
     // --- Read element text ---
-    let elem_len = (exact_end - exact_start) as usize;
+    let elem_len_raw = (exact_end - exact_start) as usize;
+    let read_limit = 5 * 1024 * 1024; // 5MB limit
+    let elem_read_len = elem_len_raw.min(read_limit);
+
     file.seek(SeekFrom::Start(exact_start))?;
-    let mut elem_buf = vec![0u8; elem_len];
+    let mut elem_buf = vec![0u8; elem_read_len];
     file.read_exact(&mut elem_buf)?;
-    let element_text = String::from_utf8_lossy(&elem_buf).to_string();
+    let mut element_text = String::from_utf8_lossy(&elem_buf).to_string();
+
+    if elem_len_raw > read_limit {
+        element_text.push_str("\n... [Element too large, truncated]");
+    }
 
     // --- Read context before (up to 2KB) ---
     let ctx_size = 10000u64;

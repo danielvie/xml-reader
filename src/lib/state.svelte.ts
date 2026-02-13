@@ -202,6 +202,10 @@ export class AppState {
     this.searchProgress = 0;
     this.searchQuery = query;
 
+    // Capture current XPath to restore if not found
+    const previousXpath = this.currentXpath;
+    this.currentXpath = "Searching...";
+
     try {
       let start = 0;
       if (this.lastMatchOffset !== null && next) {
@@ -223,7 +227,30 @@ export class AppState {
 
       if (result.found) {
         this.updateViewFromResult(result);
-        this.currentXpath = result.xpath;
+
+        if (start > 0) {
+          // Partial XPath returned because we skipped the start
+          this.currentXpath = "Constructing XPath...";
+          // result.xpath is like "/TagName"
+          const tagName = result.xpath.replace(/^\//, "");
+
+          // Asynchronously resolve full path
+          invoke<string>("resolve_xpath", {
+            path: this.currentFile,
+            offset: result.offset,
+            tagName
+          })
+            .then((fullPath) => {
+              this.currentXpath = fullPath;
+            })
+            .catch((e) => {
+              console.error("Failed to resolve XPath:", e);
+              this.currentXpath = "XPath lookup failed";
+            });
+        } else {
+          this.currentXpath = result.xpath;
+        }
+
         // Update the start percentage input to reflect where we found the match
         if (this.fileSize > 0) {
           const newPct = Number((result.offset / this.fileSize).toFixed(4));
@@ -233,12 +260,15 @@ export class AppState {
       } else {
         if (this.searchNotFoundTimer) clearTimeout(this.searchNotFoundTimer);
         this.searchNotFound = true;
+        this.currentXpath = "Not Found";
         this.searchNotFoundTimer = setTimeout(() => {
           this.searchNotFound = false;
+          this.currentXpath = previousXpath;
         }, 2000);
       }
     } catch (e) {
       console.error("Search failed:", e);
+      this.currentXpath = "Error";
     } finally {
       this.isSearching = false;
       this.searchProgress = 0;
