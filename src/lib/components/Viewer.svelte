@@ -27,15 +27,29 @@
 
         const tokens = s.split(/(<[^>]+>)/).filter(Boolean);
 
-        for (const token of tokens) {
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
             if (token.startsWith("</")) {
                 indent = Math.max(0, indent - 1);
                 formatted += pad.repeat(indent) + token + "\n";
             } else if (token.startsWith("<") && token.endsWith("/>")) {
+                // Self-closing tag
                 formatted += pad.repeat(indent) + token + "\n";
             } else if (token.startsWith("<")) {
-                formatted += pad.repeat(indent) + token + "\n";
-                indent++;
+                // Opening tag — check if it's a leaf: <tag>text</tag>
+                const next = tokens[i + 1];
+                const next2 = tokens[i + 2];
+                if (
+                    next && !next.startsWith("<") &&
+                    next2 && next2.startsWith("</")
+                ) {
+                    // Leaf element: keep on one line
+                    formatted += pad.repeat(indent) + token + next.trim() + next2 + "\n";
+                    i += 2; // skip text and closing tag
+                } else {
+                    formatted += pad.repeat(indent) + token + "\n";
+                    indent++;
+                }
             } else {
                 const trimmed = token.trim();
                 if (trimmed) {
@@ -83,16 +97,42 @@
     let highlightedAfter = $derived(highlightXml(appState.contentAfter));
     let highlightedFull = $derived(highlightXml(appState.contentWindow));
 
+    let scrollContainer: HTMLDivElement;
+
+    function scrollToActiveTop() {
+        const el = document.getElementById("active-section");
+        if (el && scrollContainer) {
+            const elTop = el.offsetTop - scrollContainer.offsetTop;
+            scrollContainer.scrollTo({
+                top: Math.max(0, elTop - 100),
+                behavior: "smooth",
+            });
+        }
+    }
+
     $effect(() => {
         // Access viewOffset to make this effect re-run on every new search result
         const _offset = appState.viewOffset;
         if (hasActiveContent) {
-            setTimeout(() => {
-                const el = document.getElementById("active-section");
-                if (el) {
-                    el.scrollIntoView({ behavior: "smooth", block: "start" });
-                }
-            }, 80);
+            setTimeout(() => scrollToActiveTop(), 80);
+        }
+    });
+
+    $effect(() => {
+        const _req = appState.scrollRequest;
+        if (_req === 0) return; // skip initial
+        const el = document.getElementById("active-section");
+        if (!el || !scrollContainer) return;
+        if (appState.scrollTarget === "top") {
+            scrollToActiveTop();
+        } else {
+            // Scroll so bottom of element is visible near bottom of viewport
+            const elBottom = el.offsetTop - scrollContainer.offsetTop + el.offsetHeight;
+            const containerHeight = scrollContainer.clientHeight;
+            scrollContainer.scrollTo({
+                top: Math.max(0, elBottom - containerHeight + 150),
+                behavior: "smooth",
+            });
         }
     });
 </script>
@@ -101,7 +141,7 @@
     <Header />
 
     <!-- ═══════════════ CONTENT ═══════════════ -->
-    <div class="flex-1 overflow-auto bg-gray-950 font-mono text-sm relative">
+    <div bind:this={scrollContainer} class="flex-1 overflow-auto bg-gray-950 font-mono text-sm relative">
         {#if hasActiveContent}
             <!-- THREE-PANEL VIEW -->
 

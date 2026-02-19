@@ -45,16 +45,16 @@
         </span>
         <span class="text-gray-700">|</span>
         <button
-            onclick={() => appState.goToStart()}
+            onclick={() => appState.focusTop()}
             class="w-7 h-8 flex items-center justify-center hover:bg-gray-800 rounded-sm text-gray-400 hover:text-white transition-colors"
-            title="Go to first element"
+            title="Focus top of element"
         >
             <IconElementFirst />
         </button>
         <button
-            onclick={() => appState.goToEnd()}
+            onclick={() => appState.focusBottom()}
             class="w-7 h-8 flex items-center justify-center hover:bg-gray-800 rounded-sm text-gray-400 hover:text-white transition-colors"
-            title="Go to last element"
+            title="Focus bottom of element"
         >
             <IconElementSecond />
         </button>

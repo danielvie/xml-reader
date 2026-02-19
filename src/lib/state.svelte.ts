@@ -56,6 +56,10 @@ export class AppState {
   // Legacy single-chunk (used before any search)
   contentWindow = $state<string>("");
 
+  // Scroll request: Viewer reacts to changes
+  scrollTarget = $state<"top" | "bottom">("top");
+  scrollRequest = $state<number>(0);
+
   // Search
   searchQuery = $state<string>(localStorage.getItem(SEARCH_QUERY_KEY) || "");
   lastMatchOffset = $state<number | null>(null);
@@ -138,36 +142,14 @@ export class AppState {
     }
   }
 
-  async goToStart() {
-    if (!this.currentFile) return;
-    this.isLoadingElement = true;
-    try {
-      const result: any = await invoke("get_first_child", {
-        path: this.currentFile,
-      });
-      this.updateViewFromResult(result);
-      this.currentXpath = result.xpath;
-    } catch (e) {
-      console.error("Failed to go to start:", e);
-    } finally {
-      this.isLoadingElement = false;
-    }
+  focusTop() {
+    this.scrollTarget = "top";
+    this.scrollRequest++;
   }
 
-  async goToEnd() {
-    if (!this.currentFile) return;
-    this.isLoadingElement = true;
-    try {
-      const result: any = await invoke("get_last_child", {
-        path: this.currentFile,
-      });
-      this.updateViewFromResult(result);
-      this.currentXpath = result.xpath;
-    } catch (e) {
-      console.error("Failed to go to end:", e);
-    } finally {
-      this.isLoadingElement = false;
-    }
+  focusBottom() {
+    this.scrollTarget = "bottom";
+    this.scrollRequest++;
   }
 
   // Helper to update state from a SearchResult
