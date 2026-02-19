@@ -678,3 +678,89 @@ fn reconstruct_xpath(path: &str, target_offset: u64) -> Result<String> {
     }
     Ok(format!("/{}", stack.join("/")))
 }
+
+#[tauri::command]
+pub async fn find_parent(path: String, child_offset: u64) -> Result<SearchResult, String> {
+    find_parent_internal(&path, child_offset).map_err(|e| e.to_string())
+}
+
+fn find_parent_internal(path: &str, child_offset: u64) -> Result<SearchResult> {
+    let file = File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let mut reader = quick_xml::Reader::from_reader(BufReader::with_capacity(1024 * 1024, file));
+    reader.check_end_names(false);
+
+    let mut buf = Vec::new();
+    // Stack of (tag_name, byte_position_before_start_event)
+    let mut stack: Vec<(String, u64)> = Vec::new();
+
+    loop {
+        let pos_before = reader.buffer_position() as u64;
+        if pos_before >= child_offset {
+            break;
+        }
+
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                stack.push((name, pos_before));
+            }
+            Ok(Event::End(_)) => {
+                stack.pop();
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    // The stack now contains ancestors of the element at child_offset.
+    // The last entry is the immediate parent.
+    if stack.is_empty() {
+        return Err(anyhow::anyhow!("No parent element found (element is at root level)"));
+    }
+
+    let (parent_name, parent_start) = stack.last().unwrap().clone();
+
+    // Build the XPath for the parent (everything in the stack)
+    let xpath = format!("/{}", stack.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join("/"));
+
+    // Now we need to find the end of the parent element.
+    // Re-open the file and parse from parent_start to find the closing tag.
+    let file2 = File::open(path)?;
+    let mut reader2 = quick_xml::Reader::from_reader(BufReader::with_capacity(1024 * 1024, file2));
+    reader2.check_end_names(false);
+
+    // Skip to parent_start
+    // We can't seek a BufReader-wrapped quick_xml reader directly, so we read and discard.
+    // For efficiency, let's re-open with seek.
+    drop(reader2);
+
+    let mut file3 = File::open(path)?;
+    file3.seek(SeekFrom::Start(parent_start))?;
+    let mut reader3 = quick_xml::Reader::from_reader(BufReader::with_capacity(1024 * 1024, file3));
+    reader3.check_end_names(false);
+
+    let mut buf3 = Vec::new();
+    // Read the first Start event (the parent itself)
+    loop {
+        match reader3.read_event_into(&mut buf3) {
+            Ok(Event::Start(ref e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                if name == parent_name {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => return Err(anyhow::anyhow!("Unexpected EOF while seeking parent start")),
+            Err(e) => return Err(anyhow::anyhow!("Parse error: {:?}", e)),
+            _ => {}
+        }
+        buf3.clear();
+    }
+
+    // Now find the matching end tag
+    let approx_end = find_element_end_pos(&mut reader3, &mut buf3, &parent_name, file_len, parent_start)?;
+
+    extract_and_build_result(path, file_len, parent_start, approx_end, &xpath)
+}

@@ -119,6 +119,28 @@
                 id="active-section"
                 class="mx-4 px-4 py-3 bg-amber-950/40 border-l-4 border-amber-400 rounded-r-lg relative group/active"
             >
+                <!-- Parent XPath breadcrumb -->
+                {#if appState.parentXpath}
+                    <button
+                        onclick={() => appState.navigateToParent()}
+                        class="mb-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-800/90 border border-gray-600 text-[11px] font-mono text-blue-400 hover:text-blue-300 hover:border-blue-500 hover:bg-gray-700/90 transition-colors cursor-pointer"
+                        title="Navigate to parent element"
+                    >
+                        <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.5"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <polyline points="18 15 12 9 6 15" />
+                        </svg>
+                        {appState.parentXpath}
+                    </button>
+                {/if}
                 <!-- Copy button -->
                 <button
                     onclick={copyElement}

@@ -60,6 +60,16 @@ export class AppState {
   searchNotFound = $state<boolean>(false);
   private searchNotFoundTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Parent XPath: strip the last segment from currentXpath
+  get parentXpath(): string {
+    if (!this.currentXpath || !this.currentXpath.includes("/")) return "";
+    const parts = this.currentXpath.split("/").filter(Boolean);
+    if (parts.length <= 1) return "";
+    // Remove last segment (which may have annotations like " (first)")
+    parts.pop();
+    return "/" + parts.join("/");
+  }
+
   // Recent files
   recentFiles = $state<RecentFile[]>(loadRecentFilesFromStorage());
 
@@ -151,6 +161,25 @@ export class AppState {
     this.contentAfter = result.context_after;
     this.contentWindow =
       this.contentBefore + this.contentActive + this.contentAfter;
+  }
+
+  async navigateToParent() {
+    if (!this.currentFile || this.lastMatchOffset === null) return;
+    this.isLoadingElement = true;
+    try {
+      const result: any = await invoke("find_parent", {
+        path: this.currentFile,
+        childOffset: this.lastMatchOffset,
+      });
+      if (result.found) {
+        this.updateViewFromResult(result);
+        this.currentXpath = result.xpath;
+      }
+    } catch (e) {
+      console.error("Failed to navigate to parent:", e);
+    } finally {
+      this.isLoadingElement = false;
+    }
   }
 
   async openFile(path: string) {
