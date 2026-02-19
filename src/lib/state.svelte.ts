@@ -15,7 +15,7 @@ export interface RecentFile {
 const RECENT_FILES_KEY = "xml-reader-recent-files";
 const MAX_RECENT_FILES = 10;
 const SEARCH_MEMORY_KEY = "xml-reader-search-memory";
-const DEFAULT_SEARCH_TYPE = "tag";
+const DEFAULT_SEARCH_TYPE = "any";
 
 interface SearchMemoryEntry {
   query: string;
@@ -187,6 +187,8 @@ export class AppState {
     this.scrollRequest++;
   }
 
+  currentLineNumber = $state<number | null>(null);
+
   // Helper to update state from a SearchResult
   private updateViewFromResult(result: any) {
     this.lastMatchOffset = result.offset;
@@ -194,6 +196,7 @@ export class AppState {
     this.contentBefore = result.context_before;
     this.contentActive = result.element_text;
     this.contentAfter = result.context_after;
+    this.currentLineNumber = result.line_number || null;
     this.contentWindow =
       this.contentBefore + this.contentActive + this.contentAfter;
   }

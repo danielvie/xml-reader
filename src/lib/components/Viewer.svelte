@@ -177,6 +177,13 @@
                 class="mx-4 px-4 py-3 bg-amber-950/40 border-l-4 border-amber-400 rounded-r-lg relative group/active"
                 style="scroll-margin-top: 120px;"
             >
+                <!-- Line Number -->
+                {#if appState.currentLineNumber}
+                    <div class="mb-2 text-[10px] uppercase tracking-wider text-amber-500/80 font-bold select-none">
+                        Line {appState.currentLineNumber.toLocaleString()}
+                    </div>
+                {/if}
+
                 <!-- Ancestor XPath breadcrumb -->
                 {#if appState.xpathSegments.length > 0}
                     <div class="mb-2 inline-flex items-center gap-0 px-2 py-1 rounded-full bg-gray-800/90 border border-gray-600 text-[11px] font-mono">

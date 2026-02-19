@@ -29,15 +29,6 @@ fn read_chunk_internal(path: &str, offset: u64, size: u32) -> Result<String> {
     Ok(s)
 }
 
-#[derive(serde::Serialize)]
-pub struct SearchResult {
-    found: bool,
-    xpath: String,
-    element_text: String,
-    context_before: String,
-    context_after: String,
-    offset: u64,
-}
 
 #[tauri::command]
 pub async fn resolve_xpath(path: String, offset: u64, tag_name: String) -> Result<String, String> {
@@ -310,6 +301,7 @@ fn search_node_internal(
                 context_before: String::new(),
                 context_after: String::new(),
                 offset: 0,
+                line_number: 0,
             });
         }
 
@@ -399,6 +391,7 @@ fn search_node_internal(
         context_before: String::new(),
         context_after: String::new(),
         offset: 0,
+        line_number: 0,
     })
 }
 
@@ -525,6 +518,45 @@ fn find_element_end_pos(
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct SearchResult {
+    found: bool,
+    xpath: String,
+    element_text: String,
+    context_before: String,
+    context_after: String,
+    offset: u64,
+    line_number: u64,
+}
+
+fn count_lines_up_to(path: &str, offset: u64) -> Result<u64> {
+    let file = File::open(path)?;
+    let mut reader = std::io::BufReader::with_capacity(1024 * 1024, file); // 1MB buffer
+    let mut count = 1; // 1-based line number
+    let mut total_read = 0;
+    
+    // Read in chunks
+    let mut buffer = [0; 8192];
+    loop {
+        let remaining = offset - total_read;
+        if remaining == 0 {
+            break;
+        }
+        
+        let to_read = std::cmp::min(remaining, buffer.len() as u64) as usize;
+        let n = reader.read(&mut buffer[..to_read])?;
+        if n == 0 {
+            break; // EOF
+        }
+        
+        // Count newlines in this chunk
+        count += buffer[..n].iter().filter(|&&b| b == b'\n').count() as u64;
+        total_read += n as u64;
+    }
+    
+    Ok(count)
+}
+
 /// Given approximate start/end positions from quick-xml, find the exact element
 /// boundaries in the file and extract the text + surrounding context.
 fn extract_and_build_result(
@@ -536,21 +568,15 @@ fn extract_and_build_result(
 ) -> Result<SearchResult> {
     let mut file = File::open(path)?;
 
-    // --- Find exact start: scan backwards for '<' ---
-    // --- Find exact start: scan backwards for '<' ---
-    // If approx_start points to whitespace/content after a tag, we need to find the START of the current tag.
-    let search_back = 128u64;
-    let scan_start = approx_start.saturating_sub(search_back);
+    // --- Find exact start: scan backward for '<' ---
+    // We start scanning back a bit from approx_start to be safe
+    let scan_back = 2048u64;
+    let scan_start = if approx_start > scan_back { approx_start - scan_back } else { 0 };
     file.seek(SeekFrom::Start(scan_start))?;
-    let scan_len = (approx_start - scan_start + 1) as usize;
-    let mut scan_buf = vec![0u8; scan_len];
-    let n = file.read(&mut scan_buf)?;
-
-    // We want the LAST '<' in the buffer that is NOT part of a closing tag like '</...>'.
-    // Actually, quick-xml event position is usually at the start of the event.
-    // If it points to '<', we are good.
-    // If it points to ' ' (whitespace), we want the NEXT '<', not the previous one.
-    // BUT pos_before is captured *before* the event.
+    
+    let n = (approx_start - scan_start) as usize;
+    let mut scan_buf = vec![0u8; n];
+    file.read(&mut scan_buf)?; // Read up to approx_start
 
     // Check if the byte at the very end (approx_start) is '<'.
     let mut exact_start = approx_start;
@@ -598,43 +624,31 @@ fn extract_and_build_result(
         }
     }
 
-    // --- Read element text ---
-    let elem_len_raw = (exact_end - exact_start) as usize;
-    let read_limit = 5 * 1024 * 1024; // 5MB limit
-    let elem_read_len = elem_len_raw.min(read_limit);
-
+    // --- Read Element Text ---
+    let len = exact_end - exact_start;
     file.seek(SeekFrom::Start(exact_start))?;
-    let mut elem_buf = vec![0u8; elem_read_len];
-    file.read_exact(&mut elem_buf)?;
-    let mut element_text = String::from_utf8_lossy(&elem_buf).to_string();
+    let mut element_buf = vec![0u8; len as usize];
+    file.read(&mut element_buf)?;
+    let element_text = String::from_utf8_lossy(&element_buf).to_string();
 
-    if elem_len_raw > read_limit {
-        element_text.push_str("\n... [Element too large, truncated]");
-    }
+    // --- Read Context Before ---
+    let context_len = 2000u64;
+    let context_start = if exact_start > context_len { exact_start - context_len } else { 0 };
+    file.seek(SeekFrom::Start(context_start))?;
+    let context_read_len = (exact_start - context_start) as usize;
+    let mut context_before_buf = vec![0u8; context_read_len];
+    file.read(&mut context_before_buf)?;
+    let context_before = String::from_utf8_lossy(&context_before_buf).to_string();
 
-    // --- Read context before (up to 2KB) ---
-    let ctx_size = 10000u64;
-    let before_start = exact_start.saturating_sub(ctx_size);
-    let before_len = (exact_start - before_start) as usize;
-    let context_before = if before_len > 0 {
-        file.seek(SeekFrom::Start(before_start))?;
-        let mut bb = vec![0u8; before_len];
-        let nb = file.read(&mut bb)?;
-        String::from_utf8_lossy(&bb[..nb]).to_string()
-    } else {
-        String::new()
-    };
+    // --- Read Context After ---
+    file.seek(SeekFrom::Start(exact_end))?;
+    let after_len = context_len.min(file_len - exact_end) as usize;
+    let mut context_after_buf = vec![0u8; after_len];
+    file.read(&mut context_after_buf)?;
+    let context_after = String::from_utf8_lossy(&context_after_buf).to_string();
 
-    // --- Read context after (up to 2KB) ---
-    let after_len = ctx_size.min(file_len - exact_end) as usize;
-    let context_after = if after_len > 0 {
-        file.seek(SeekFrom::Start(exact_end))?;
-        let mut ab = vec![0u8; after_len];
-        let na = file.read(&mut ab)?;
-        String::from_utf8_lossy(&ab[..na]).to_string()
-    } else {
-        String::new()
-    };
+    // --- Count Lines ---
+    let line_number = count_lines_up_to(path, exact_start).unwrap_or(0);
 
     Ok(SearchResult {
         found: true,
@@ -643,6 +657,7 @@ fn extract_and_build_result(
         context_before,
         context_after,
         offset: exact_start,
+        line_number,
     })
 }
 
