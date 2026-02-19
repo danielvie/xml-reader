@@ -13,3 +13,15 @@ tasks:
     aliases: [b]
     cmds:
       - bun run tauri build
+
+  ver:patch:
+    desc: Bump patch version (0.0.x)
+    cmds: [bun scripts/bump-version.ts patch]
+
+  ver:minor:
+    desc: Bump minor version (0.x.0)
+    cmds: [bun scripts/bump-version.ts minor]
+
+  ver:major:
+    desc: Bump major version (x.0.0)
+    cmds: [bun scripts/bump-version.ts major]
