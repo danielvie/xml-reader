@@ -4,12 +4,11 @@
     import IconElementSecond from "$lib/components/icons/IconElementSecond.svelte";
     import IconHome from "$lib/components/icons/IconHome.svelte";
 
-    let searchQuery = $state("");
     let copiedFlash = $state(false);
 
     function handleSearch(next: boolean) {
-        if (!searchQuery) return;
-        appState.performSearch(searchQuery, next);
+        if (!appState.searchQuery) return;
+        appState.performSearch(appState.searchQuery, next);
     }
 
     async function copyXpath() {
@@ -67,6 +66,7 @@
     >
         <select
             bind:value={appState.searchType}
+            onchange={() => appState.saveSearchPrefs()}
             class="bg-transparent text-xs text-gray-400 border-none outline-none font-mono cursor-pointer *:bg-gray-800 *:text-gray-300"
         >
             <option value="any">Any</option>
@@ -82,12 +82,33 @@
         <div class="relative flex-1 min-w-0">
             <input
                 type="text"
-                bind:value={searchQuery}
+                bind:value={appState.searchQuery}
                 onkeydown={(e) => e.key === "Enter" && handleSearch(false)}
                 placeholder="Find tag..."
                 class="w-full bg-transparent py-0 px-2 font-mono border-none outline-none text-xs text-gray-200 placeholder-gray-600"
             />
         </div>
+        {#if appState.searchQuery || appState.searchType !== "tag"}
+            <button
+                onclick={() => appState.clearSearch()}
+                class="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-white hover:bg-gray-700 rounded-sm transition-colors shrink-0"
+                title="Clear search"
+            >
+                <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+            </button>
+        {/if}
     </div>
 
     <!-- Search / Cancel / Next -->

@@ -14,6 +14,9 @@ export interface RecentFile {
 
 const RECENT_FILES_KEY = "xml-reader-recent-files";
 const MAX_RECENT_FILES = 10;
+const SEARCH_TYPE_KEY = "xml-reader-search-type";
+const SEARCH_QUERY_KEY = "xml-reader-search-query";
+const DEFAULT_SEARCH_TYPE = "tag";
 
 function loadRecentFilesFromStorage(): RecentFile[] {
   try {
@@ -43,7 +46,7 @@ export class AppState {
   isSearching = $state<boolean>(false);
   isLoadingElement = $state<boolean>(false);
   searchProgress = $state<number>(0);
-  searchType = $state<string>("tag");
+  searchType = $state<string>(localStorage.getItem(SEARCH_TYPE_KEY) || DEFAULT_SEARCH_TYPE);
 
   // Three-section content
   contentBefore = $state<string>("");
@@ -54,20 +57,19 @@ export class AppState {
   contentWindow = $state<string>("");
 
   // Search
-  searchQuery = $state<string>("");
+  searchQuery = $state<string>(localStorage.getItem(SEARCH_QUERY_KEY) || "");
   lastMatchOffset = $state<number | null>(null);
   currentXpath = $state<string>("");
   searchNotFound = $state<boolean>(false);
   private searchNotFoundTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Parent XPath: strip the last segment from currentXpath
-  get parentXpath(): string {
-    if (!this.currentXpath || !this.currentXpath.includes("/")) return "";
+  // Ancestor segments from currentXpath (excludes the element itself)
+  get xpathSegments(): { name: string; depth: number }[] {
+    if (!this.currentXpath || !this.currentXpath.includes("/")) return [];
     const parts = this.currentXpath.split("/").filter(Boolean);
-    if (parts.length <= 1) return "";
-    // Remove last segment (which may have annotations like " (first)")
-    parts.pop();
-    return "/" + parts.join("/");
+    if (parts.length <= 1) return [];
+    // All segments except the last (which is the current element)
+    return parts.slice(0, -1).map((name, i) => ({ name, depth: i }));
   }
 
   // Recent files
@@ -113,11 +115,27 @@ export class AppState {
     this.contentBefore = "";
     this.contentActive = "";
     this.contentAfter = "";
-    this.searchQuery = "";
     this.lastMatchOffset = null;
     this.currentXpath = "";
     this.isSearching = false;
     this.isLoadingElement = false;
+    // searchQuery and searchType are intentionally preserved
+  }
+
+  clearSearch() {
+    this.searchQuery = "";
+    this.searchType = DEFAULT_SEARCH_TYPE;
+    this.lastMatchOffset = null;
+    this.saveSearchPrefs();
+  }
+
+  saveSearchPrefs() {
+    try {
+      localStorage.setItem(SEARCH_TYPE_KEY, this.searchType);
+      localStorage.setItem(SEARCH_QUERY_KEY, this.searchQuery);
+    } catch {
+      // storage full or unavailable — ignore
+    }
   }
 
   async goToStart() {
@@ -163,20 +181,21 @@ export class AppState {
       this.contentBefore + this.contentActive + this.contentAfter;
   }
 
-  async navigateToParent() {
+  async navigateToAncestor(depth: number) {
     if (!this.currentFile || this.lastMatchOffset === null) return;
     this.isLoadingElement = true;
     try {
       const result: any = await invoke("find_parent", {
         path: this.currentFile,
         childOffset: this.lastMatchOffset,
+        ancestorDepth: depth,
       });
       if (result.found) {
         this.updateViewFromResult(result);
         this.currentXpath = result.xpath;
       }
     } catch (e) {
-      console.error("Failed to navigate to parent:", e);
+      console.error("Failed to navigate to ancestor:", e);
     } finally {
       this.isLoadingElement = false;
     }
@@ -187,7 +206,6 @@ export class AppState {
       this.fileSize = await invoke("open_file", { path });
       this.currentFile = path;
       this.viewOffset = 0;
-      this.searchQuery = "";
       this.lastMatchOffset = null;
       this.currentXpath = "";
       this.contentBefore = "";
@@ -221,6 +239,7 @@ export class AppState {
     this.isSearching = true;
     this.searchProgress = 0;
     this.searchQuery = query;
+    this.saveSearchPrefs();
 
     // Capture current XPath to restore if not found
     const previousXpath = this.currentXpath;
