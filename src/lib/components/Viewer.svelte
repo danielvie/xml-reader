@@ -90,7 +90,7 @@
             setTimeout(() => {
                 const el = document.getElementById("active-section");
                 if (el) {
-                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.scrollIntoView({ behavior: "smooth", block: "start" });
                 }
             }, 80);
         }
@@ -118,6 +118,7 @@
             <div
                 id="active-section"
                 class="mx-4 px-4 py-3 bg-amber-950/40 border-l-4 border-amber-400 rounded-r-lg relative group/active"
+                style="scroll-margin-top: 120px;"
             >
                 <!-- Ancestor XPath breadcrumb -->
                 {#if appState.xpathSegments.length > 0}
