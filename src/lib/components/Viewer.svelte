@@ -36,16 +36,19 @@
                 // Self-closing tag
                 formatted += pad.repeat(indent) + token + "\n";
             } else if (token.startsWith("<")) {
-                // Opening tag — check if it's a leaf: <tag>text</tag>
                 const next = tokens[i + 1];
                 const next2 = tokens[i + 2];
-                if (
+                if (next && next.startsWith("</")) {
+                    // Empty element: <tag></tag> on one line
+                    formatted += pad.repeat(indent) + token + next + "\n";
+                    i += 1;
+                } else if (
                     next && !next.startsWith("<") &&
                     next2 && next2.startsWith("</")
                 ) {
                     // Leaf element: keep on one line
                     formatted += pad.repeat(indent) + token + next.trim() + next2 + "\n";
-                    i += 2; // skip text and closing tag
+                    i += 2;
                 } else {
                     formatted += pad.repeat(indent) + token + "\n";
                     indent++;
@@ -135,7 +138,21 @@
             });
         }
     });
+
+    function handleKeydown(e: KeyboardEvent) {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+            return;
+        }
+        if (e.key === "n" || e.key === "N") {
+            // "n" for next match
+            if (appState.searchQuery) {
+                appState.performSearch(appState.searchQuery, true);
+            }
+        }
+    }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="flex flex-col h-screen bg-gray-950 text-gray-100">
     <Header />

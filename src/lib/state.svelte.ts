@@ -14,9 +14,31 @@ export interface RecentFile {
 
 const RECENT_FILES_KEY = "xml-reader-recent-files";
 const MAX_RECENT_FILES = 10;
-const SEARCH_TYPE_KEY = "xml-reader-search-type";
-const SEARCH_QUERY_KEY = "xml-reader-search-query";
+const SEARCH_MEMORY_KEY = "xml-reader-search-memory";
 const DEFAULT_SEARCH_TYPE = "tag";
+
+interface SearchMemoryEntry {
+  query: string;
+  type: string;
+}
+
+function loadSearchMemory(): Record<string, SearchMemoryEntry> {
+  try {
+    const raw = localStorage.getItem(SEARCH_MEMORY_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function saveSearchMemory(memory: Record<string, SearchMemoryEntry>) {
+  try {
+    localStorage.setItem(SEARCH_MEMORY_KEY, JSON.stringify(memory));
+  } catch {
+    // storage full or unavailable — ignore
+  }
+}
 
 function loadRecentFilesFromStorage(): RecentFile[] {
   try {
@@ -46,7 +68,7 @@ export class AppState {
   isSearching = $state<boolean>(false);
   isLoadingElement = $state<boolean>(false);
   searchProgress = $state<number>(0);
-  searchType = $state<string>(localStorage.getItem(SEARCH_TYPE_KEY) || DEFAULT_SEARCH_TYPE);
+  searchType = $state<string>(DEFAULT_SEARCH_TYPE);
 
   // Three-section content
   contentBefore = $state<string>("");
@@ -61,7 +83,7 @@ export class AppState {
   scrollRequest = $state<number>(0);
 
   // Search
-  searchQuery = $state<string>(localStorage.getItem(SEARCH_QUERY_KEY) || "");
+  searchQuery = $state<string>("");
   lastMatchOffset = $state<number | null>(null);
   currentXpath = $state<string>("");
   searchNotFound = $state<boolean>(false);
@@ -134,11 +156,24 @@ export class AppState {
   }
 
   saveSearchPrefs() {
-    try {
-      localStorage.setItem(SEARCH_TYPE_KEY, this.searchType);
-      localStorage.setItem(SEARCH_QUERY_KEY, this.searchQuery);
-    } catch {
-      // storage full or unavailable — ignore
+    if (!this.currentFile) return;
+    const memory = loadSearchMemory();
+    memory[this.currentFile] = {
+      query: this.searchQuery,
+      type: this.searchType,
+    };
+    saveSearchMemory(memory);
+  }
+
+  private loadSearchPrefsForFile(path: string) {
+    const memory = loadSearchMemory();
+    const entry = memory[path];
+    if (entry) {
+      this.searchQuery = entry.query;
+      this.searchType = entry.type;
+    } else {
+      this.searchQuery = "";
+      this.searchType = DEFAULT_SEARCH_TYPE;
     }
   }
 
@@ -194,6 +229,7 @@ export class AppState {
       this.contentActive = "";
       this.contentAfter = "";
       this.addToRecentFiles(path);
+      this.loadSearchPrefsForFile(path);
       await this.loadChunk();
     } catch (e) {
       console.error("Failed to open file:", e);
