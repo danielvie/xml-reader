@@ -5,7 +5,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            xml_ops::generate_large_xml,
             xml_ops::open_file,
             xml_ops::read_chunk,
             xml_ops::search_node,

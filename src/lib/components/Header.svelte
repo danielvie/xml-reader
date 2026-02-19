@@ -70,6 +70,7 @@
             class="bg-transparent text-xs text-gray-400 border-none outline-none font-mono cursor-pointer *:bg-gray-800 *:text-gray-300"
         >
             <option value="any">Any</option>
+            <option value="tag">Tag</option>
             <option value="guid">GUID</option>
             <option value="id">ID</option>
             <option value="name">Name</option>
@@ -78,28 +79,18 @@
             <option value="guidref">GUIDRef</option>
         </select>
         <div class="h-4 w-px bg-gray-700 shrink-0"></div>
-        <input
-            type="number"
-            min="0"
-            max="1"
-            step="0.1"
-            bind:value={appState.searchStartPercentage}
-            class="bg-transparent text-xs text-gray-400 border-none outline-none font-mono w-10 text-center"
-            title="Start % (0.0-1.0)"
-        />
-        <div class="h-4 w-px bg-gray-700 shrink-0"></div>
         <div class="relative flex-1 min-w-0">
             <input
                 type="text"
                 bind:value={searchQuery}
-                onkeydown={(e) => e.key === "Enter" && handleSearch(true)}
+                onkeydown={(e) => e.key === "Enter" && handleSearch(false)}
                 placeholder="Find tag..."
                 class="w-full bg-transparent py-0 px-2 font-mono border-none outline-none text-xs text-gray-200 placeholder-gray-600"
             />
         </div>
     </div>
 
-    <!-- Cancel / Prev / Next -->
+    <!-- Search / Cancel / Next -->
     <div class="flex gap-0.5 shrink-0">
         {#if appState.isSearching}
             <button
@@ -124,12 +115,12 @@
         {/if}
         <button
             onclick={() => handleSearch(false)}
-            class="w-7 h-7 flex items-center justify-center hover:bg-gray-800 rounded-sm text-gray-400 hover:text-white transition-colors"
-            title="Previous match"
+            class="h-7 px-2.5 flex items-center justify-center gap-1 bg-blue-600 hover:bg-blue-500 rounded-sm text-white transition-colors text-xs font-medium"
+            title="Search from start"
         >
             <svg
-                width="14"
-                height="14"
+                width="13"
+                height="13"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -137,8 +128,10 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
             >
-                <polyline points="15 18 9 12 15 6" />
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
+            Search
         </button>
         <button
             onclick={() => handleSearch(true)}

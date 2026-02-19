@@ -84,6 +84,8 @@
     let highlightedFull = $derived(highlightXml(appState.contentWindow));
 
     $effect(() => {
+        // Access viewOffset to make this effect re-run on every new search result
+        const _offset = appState.viewOffset;
         if (hasActiveContent) {
             setTimeout(() => {
                 const el = document.getElementById("active-section");

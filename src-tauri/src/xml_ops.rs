@@ -1,108 +1,10 @@
 use anyhow::Result;
 use quick_xml::events::{BytesStart, Event};
-use quick_xml::writer::Writer;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static SEARCH_CANCELLED: AtomicBool = AtomicBool::new(false);
-
-#[tauri::command]
-pub async fn generate_large_xml(path: String, size_mb: u32, depth: u32) -> Result<(), String> {
-    generate_xml_internal(&path, size_mb, depth).map_err(|e| e.to_string())
-}
-
-fn generate_xml_internal(path: &str, size_mb: u32, depth: u32) -> Result<()> {
-    let target_size = (size_mb as u64) * 1024 * 1024;
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = File::create(path)?;
-    let mut writer = Writer::new(BufWriter::new(file));
-
-    let root = BytesStart::new("root");
-    writer.write_event(Event::Start(root.clone()))?;
-
-    let mut current_size = 0u64;
-    let mut item_count = 0u64;
-    let max_depth = depth.max(1);
-
-    while current_size < target_size {
-        let written = write_nested_element(&mut writer, &mut item_count, 1, max_depth)?;
-        current_size += written;
-    }
-
-    writer.write_event(Event::End(root.to_end()))?;
-    writer.into_inner().flush()?;
-
-    Ok(())
-}
-
-/// Generate a pseudo-UUID from a counter for deterministic but unique-looking IDs.
-fn pseudo_uuid(n: u64) -> String {
-    let h = n
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    let a = (h >> 32) as u32;
-    let b = (h >> 16) as u16;
-    let c = (h & 0xFFFF) as u16;
-    let d = n as u16;
-    let e = (n >> 16) as u32 ^ 0xDEAD;
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:04x}-{:08x}{:04x}",
-        a,
-        b,
-        c,
-        d,
-        e,
-        (n & 0xFFFF) as u16
-    )
-}
-
-/// Generate a human-readable name from a counter.
-fn item_name(level: u32, n: u64) -> String {
-    let names = [
-        "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta", "Iota", "Kappa",
-    ];
-    let base = names[(n % names.len() as u64) as usize];
-    format!("{}_L{}", base, level)
-}
-
-fn write_nested_element(
-    writer: &mut Writer<BufWriter<File>>,
-    item_count: &mut u64,
-    current_level: u32,
-    max_depth: u32,
-) -> Result<u64> {
-    let id = *item_count;
-    let node_name = format!("item_{}_{}", current_level, id);
-    *item_count += 1;
-
-    let guid = pseudo_uuid(id);
-    let name = item_name(current_level, id);
-
-    let mut node = BytesStart::new(&node_name);
-    node.push_attribute(("guid", guid.as_str()));
-    node.push_attribute(("id", id.to_string().as_str()));
-    node.push_attribute(("name", name.as_str()));
-    writer.write_event(Event::Start(node.clone()))?;
-
-    // Rough byte estimate: open tag + attrs + close tag
-    let mut bytes_written = node_name.len() as u64 * 2 + guid.len() as u64 + name.len() as u64 + 60;
-
-    if current_level >= max_depth {
-        let content = format!("Content for {} (guid={}).", node_name, guid);
-        writer.write_event(Event::Text(quick_xml::events::BytesText::new(&content)))?;
-        bytes_written += content.len() as u64;
-    } else {
-        let child_bytes = write_nested_element(writer, item_count, current_level + 1, max_depth)?;
-        bytes_written += child_bytes;
-    }
-
-    writer.write_event(Event::End(node.to_end()))?;
-
-    Ok(bytes_written)
-}
 
 #[tauri::command]
 pub async fn open_file(path: String) -> Result<u64, String> {

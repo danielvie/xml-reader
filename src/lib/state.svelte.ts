@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
 
 export interface RecentFile {
@@ -44,9 +43,7 @@ export class AppState {
   isSearching = $state<boolean>(false);
   isLoadingElement = $state<boolean>(false);
   searchProgress = $state<number>(0);
-  searchType = $state<string>("guid");
-  searchStartPercentage = $state<number>(0);
-  syncedPercentage = 0;
+  searchType = $state<string>("tag");
 
   // Three-section content
   contentBefore = $state<string>("");
@@ -189,14 +186,8 @@ export class AppState {
     }
   }
 
-  async performSearch(query: string, next: boolean = true) {
+  async performSearch(query: string, next: boolean = false) {
     if (!this.currentFile || !query) return;
-
-    // If user manually changed the percentage, restart the search flow
-    if (Math.abs(this.searchStartPercentage - this.syncedPercentage) > 0.0001) {
-      this.lastMatchOffset = null;
-      this.syncedPercentage = this.searchStartPercentage;
-    }
 
     this.isSearching = true;
     this.searchProgress = 0;
@@ -210,12 +201,7 @@ export class AppState {
       let start = 0;
       if (this.lastMatchOffset !== null && next) {
         start = this.lastMatchOffset + 1;
-        // When continuing, the progress reflects current position
         this.searchProgress = Math.floor((start / this.fileSize) * 100);
-      } else {
-        // Start from the specified percentage
-        start = Math.floor(this.fileSize * this.searchStartPercentage);
-        this.searchProgress = Math.floor(this.searchStartPercentage * 100);
       }
 
       const result: any = await invoke("search_node", {
@@ -229,12 +215,9 @@ export class AppState {
         this.updateViewFromResult(result);
 
         if (start > 0) {
-          // Partial XPath returned because we skipped the start
           this.currentXpath = "Constructing XPath...";
-          // result.xpath is like "/TagName"
           const tagName = result.xpath.replace(/^\//, "");
 
-          // Asynchronously resolve full path
           invoke<string>("resolve_xpath", {
             path: this.currentFile,
             offset: result.offset,
@@ -249,13 +232,6 @@ export class AppState {
             });
         } else {
           this.currentXpath = result.xpath;
-        }
-
-        // Update the start percentage input to reflect where we found the match
-        if (this.fileSize > 0) {
-          const newPct = Number((result.offset / this.fileSize).toFixed(4));
-          this.searchStartPercentage = newPct;
-          this.syncedPercentage = newPct;
         }
       } else {
         if (this.searchNotFoundTimer) clearTimeout(this.searchNotFoundTimer);
@@ -322,27 +298,6 @@ export class AppState {
         this.contentBefore + this.contentActive + this.contentAfter;
     } catch (e) {
       console.error("Failed to load sections:", e);
-    }
-  }
-
-  async generateSampleFile(sizeMb: number = 50, depth: number = 3) {
-    console.log(`Starting sample generation (${sizeMb}MB, depth ${depth})...`);
-    try {
-      const baseDir = await appLocalDataDir();
-      const fullPath = await join(baseDir, `sample_${sizeMb}_${depth}.xml`);
-
-      console.log("Invoking generate_large_xml command at:", fullPath);
-      await invoke("generate_large_xml", {
-        path: fullPath,
-        sizeMb,
-        depth,
-      });
-      console.log("Generation complete. Opening file...");
-      await this.openFile(fullPath);
-      console.log("File opened successfully.");
-    } catch (e) {
-      console.error("Generation failed:", e);
-      alert("Failed to generate file: " + e);
     }
   }
 }
