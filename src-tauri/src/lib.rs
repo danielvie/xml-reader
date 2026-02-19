@@ -12,7 +12,9 @@ pub fn run() {
             xml_ops::get_first_child,
             xml_ops::get_last_child,
             xml_ops::resolve_xpath,
-            xml_ops::find_parent
+            xml_ops::resolve_xpath,
+            xml_ops::find_parent,
+            xml_ops::read_element_at_offset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -22,6 +22,12 @@ interface SearchMemoryEntry {
   type: string;
 }
 
+export interface AncestorInfo {
+  name: string;
+  offset: number;
+  line_number: number;
+}
+
 function loadSearchMemory(): Record<string, SearchMemoryEntry> {
   try {
     const raw = localStorage.getItem(SEARCH_MEMORY_KEY);
@@ -188,6 +194,7 @@ export class AppState {
   }
 
   currentLineNumber = $state<number | null>(null);
+  ancestors = $state<AncestorInfo[]>([]);
 
   // Helper to update state from a SearchResult
   private updateViewFromResult(result: any) {
@@ -197,13 +204,82 @@ export class AppState {
     this.contentActive = result.element_text;
     this.contentAfter = result.context_after;
     this.currentLineNumber = result.line_number || null;
+    this.ancestors = result.ancestors || [];
     this.contentWindow =
       this.contentBefore + this.contentActive + this.contentAfter;
   }
 
   async navigateToAncestor(depth: number) {
-    if (!this.currentFile || this.lastMatchOffset === null) return;
+    if (!this.currentFile) return;
     this.isLoadingElement = true;
+
+    // Check if we have cached ancestor info
+    if (this.ancestors[depth]) {
+      const ancestor = this.ancestors[depth];
+      // Use cached offset
+      try {
+        const result: any = await invoke("read_element_at_offset", {
+            path: this.currentFile,
+            offset: ancestor.offset,
+        });
+        
+        // When we jump to an ancestor, the new ancestors list is a prefix of the old one.
+        // The backend might return empty ancestors for read_element_at_offset (as implemented),
+        // so we should reconstruct or preserve the known ancestors.
+        // Actually, logic: if we go to depth K, the new ancestors are 0..K-1.
+        // The current element (at depth K) becomes the active one.
+        // So we can manually fix up the state if backend doesn't return ancestors.
+        
+        if (result.ancestors && result.ancestors.length === 0) {
+            // Reconstruct ancestors from our cache
+            result.ancestors = this.ancestors.slice(0, depth);
+            // Result xpath might be ".../name", we might want to fix it if needed,
+            // but the frontend reconstruction in xpathSegments getter relies on currentXpath string.
+            // The backend read_element_at_offset returns xpath ending in /name.
+            // We should ideally ensure currentXpath is correct.
+            // Let's rely on what we know:
+            // currentXpath should be /Ancestors.../Target
+        }
+        
+        this.updateViewFromResult(result);
+        
+        // Fix up xpath if backend returned partial
+        if (result.xpath.startsWith("...")) {
+            // Reconstruct full xpath
+             const parts = this.ancestors.slice(0, depth).map(a => a.name);
+             // And add current element name (which might handle indices or not? Backend handles indices...)
+             // Wait, if we use read_element_at_offset, backend returns generic xpath like ".../name".
+             // We lose the index info like "Create[3]".
+             // But we have the full xpath in `this.ancestors`? No, `AncestorInfo` only has `name`.
+             // Actually, `this.currentXpath` has the full string!
+             // We can just slice `this.currentXpath`.
+             const segments = this.currentXpath.split("/").filter(Boolean);
+             // We want segments 0..depth.
+             if (segments.length > depth) {
+                 const newPath = "/" + segments.slice(0, depth + 1).join("/");
+                 this.currentXpath = newPath;
+             }
+        }
+
+        this.focusTop();
+      } catch (e) {
+        console.error("Optimized nav failed, falling back", e);
+        this.fallbackNavigateToAncestor(depth);
+      } finally {
+        this.isLoadingElement = false;
+      }
+      return;
+    }
+
+    this.fallbackNavigateToAncestor(depth);
+  }
+
+  private async fallbackNavigateToAncestor(depth: number) {
+    if (!this.currentFile || this.lastMatchOffset === null) {
+        this.isLoadingElement = false; 
+        return; 
+    }
+    
     try {
       const result: any = await invoke("find_parent", {
         path: this.currentFile,
@@ -213,9 +289,10 @@ export class AppState {
       if (result.found) {
         this.updateViewFromResult(result);
         this.currentXpath = result.xpath;
+        this.focusTop();
       }
     } catch (e) {
-      console.error("Failed to navigate to ancestor:", e);
+      console.error(e);
     } finally {
       this.isLoadingElement = false;
     }
